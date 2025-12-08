@@ -551,25 +551,41 @@ def list_removable_mounts():
     # -------------------------
     # LINUX / macOS
     # -------------------------
+    system = platform.system()
+
     for p in psutil.disk_partitions(all=False):
         try:
             fstype = (p.fstype or "").lower()
         except Exception:
             fstype = ""
-        if (
-            "media" in p.mountpoint.lower()
-            or "volumes" in p.mountpoint.lower()
-            or fstype in ("vfat", "exfat", "msdos", "ntfs", "hfs", "apfs")
-        ):
-            # Si tienes EVISTR_SUBDIR, prefierelo
-            full_path = os.path.join(p.mountpoint, EVISTR_SUBDIR)
-            if os.path.exists(full_path):
-                mounts.append(full_path)
-            else:
-                mounts.append(p.mountpoint)
 
+        mp = p.mountpoint
+
+        # Filtrado específico por sistema
+        if system == "Darwin":  # macOS
+            # En macOS los USB externos típicamente están en /Volumes/Nombre
+            if "/volumes/" not in mp.lower():
+                continue
+        else:
+            # Linux: típicamente /media, /mnt, vfat/exfat
+            if (
+                "media" not in mp.lower()
+                and "mnt" not in mp.lower()
+                and fstype not in ("vfat", "exfat", "msdos", "ntfs")
+            ):
+                continue
+
+        # Si tienes EVISTR_SUBDIR, prefierelo
+        full_path = os.path.join(mp, EVISTR_SUBDIR)
+        if os.path.exists(full_path):
+            mounts.append(full_path)
+        else:
+            mounts.append(mp)
+
+    # Agregar EXTRA_SCAN_DIRS (por si quieres forzar rutas)
     mounts.extend([p for p in EXTRA_SCAN_DIRS if os.path.exists(p)])
 
+    # Deduplicar
     seen, uniq = set(), []
     for m in mounts:
         if m and m not in seen and os.path.exists(m):
