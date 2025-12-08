@@ -211,14 +211,30 @@ EXTRA_SCAN_DIRS = [
 EVISTR_LABEL = os.getenv("EVISTR_LABEL")          # p.ej. 'L357'
 EVISTR_SUBDIR = os.getenv("EVISTR_SUBDIR", "RECORD")
 
+def _read_state_safe() -> dict:
+    try:
+        text = STATE.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return {}
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return {}
 
 
 
 
 def _ensure_dirs():
-    # Solo lo necesario para logging y state al inicio
+    # Crea carpetas base
     APP_ROOT.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Asegura carpeta y archivo de estado
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    if not STATE.exists():
+        STATE.write_text("{}", encoding="utf-8")
 
 def _single_instance_lock():
     """
@@ -323,8 +339,12 @@ $lnk.Save();
 '''
     subprocess.run(["powershell","-NoProfile","-ExecutionPolicy","Bypass","-Command", ps], check=True)
 
-def _mark_installed(method:str):
-    STATE.write_text(json.dumps({"installed": True, "method": method, "ts": time.time()}, indent=2), encoding="utf-8")
+def _mark_installed(method: str):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(
+        json.dumps({"installed": True, "method": method, "ts": time.time()}, indent=2),
+        encoding="utf-8"
+    )
 
 def _already_installed():
     return STATE.exists()
@@ -333,25 +353,25 @@ def ensure_autorun():
     _ensure_dirs()
     _single_instance_lock()
 
-    system = platform.system()
+    # Solo configuramos auto-inicio en Windows.
+    if platform.system() != "Windows":
+        # En macOS simplemente dejamos el lock y no tocamos nada de tareas/shortcuts
+        return
 
-    if system == "Windows":
-        if _already_installed():
-            return
-        try:
-            if _is_admin():
-                _install_task_onstart()
-                _mark_installed("task_onstart")
-            else:
-                _install_startup_shortcut()
-                _mark_installed("startup_shortcut")
-        except:
+    if _already_installed():
+        return
+    try:
+        if _is_admin():
+            _install_task_onstart()
+            _mark_installed("task_onstart")
+        else:
+            # sin admin: al menos arrancará al iniciar sesión
             _install_startup_shortcut()
-            _mark_installed("startup_shortcut_fallback")
-
-    elif system == "Darwin":  # macOS
-        # instalamos autorun estilo macOS
-        _install_mac_autorun()
+            _mark_installed("startup_shortcut")
+    except Exception as e:
+        # último intento: aunque falle, seguimos corriendo normal
+        _install_startup_shortcut()
+        _mark_installed("startup_shortcut_fallback")
 
 # === LOGGING a archivo + consola (rotativo) ===
 import logging, logging.handlers
@@ -369,8 +389,14 @@ log = logging.getLogger()
 # === LLAMADA DE ARRANQUE ===
 setup_logging()
 ensure_autorun()
-logging.getLogger().info("Auto-run OK; método de instalación: %s",
-                         json.loads(STATE.read_text(encoding="utf-8")).get("method"))
+state = _read_state_safe()
+method = state.get("method")
+
+# En macOS nunca llamas a _mark_installed, así que dale un default bonito
+if method is None and platform.system() == "Darwin":
+    method = "launchagent_mac"
+
+logging.getLogger().info("Auto-run OK; método de instalación: %s", method)
 
 
 
