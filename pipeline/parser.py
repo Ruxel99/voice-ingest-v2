@@ -136,7 +136,11 @@ transcript that refer to products, you MUST return at least N items/batches in t
 We only have three intents:
 
 - "PRODUCTION"  → cuando se está HACIENDO / PRODUCIENDO ("hice", "se hicieron", "en la batidora X", etc.).
-- "INVENTORY"   → cuando se habla de stock actual ("quedan", "hay", "en inventario").
+- "INVENTORY"   → cuando se habla de stock actual o movimientos de inventario:
+    - stock actual: ("quedan", "queda", "hay", "hay en inventario", "stock", "en inventario").
+    - movimientos de inventario / recibidos de fábrica: ("recibimos", "recibí", "recibio", "recibió",
+      "se enviaron", "enviamos", "mandamos", "llegaron", "llegó", "salieron", "desde fábrica", "de fábrica").
+  En TODOS esos casos, el intent sigue siendo "INVENTORY".
 - "SALES"       → cuando se habla de ventas ("vendí", "vendimos", "se vendieron", "ventas").
 
 ### GENERAL SALES PATTERN (VERY IMPORTANT)
@@ -172,6 +176,9 @@ Examples:
 - "quedan {{quantity}} de {{flavor}}"
 - "hay {{quantity}} galletas de {{flavor}}"
 - "inventario: {{flavor}} {{quantity}}"
+- "se enviaron {{quantity}} de {{flavor}} a {{lugar}}"
+- "recibimos {{quantity}} de {{flavor}}"
+- "llegaron {{quantity}} de {{flavor}}"
 
 Each flavor becomes one item in "items".
 
@@ -258,7 +265,7 @@ IMPORTANT:
 ### Intent Decision (MUST)
 
 - If the transcript is about making products (hice, se hicieron, batidora, mezcladora) → "PRODUCTION".
-- If the transcript is about stock remaining (quedan, hay en inventario) → "INVENTORY".
+- If the transcript is about stock remaining o movimientos de inventario (quedan, hay en inventario, stock, recibimos, se enviaron, llegaron, mandamos desde fábrica) → "INVENTORY".
 - If the transcript is about selling products (vendí, vendimos, se vendieron, ventas) → "SALES".
 - If both production and sales appear mixed, choose the INTENT that best matches the majority of numeric patterns.
 
