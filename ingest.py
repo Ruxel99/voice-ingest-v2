@@ -548,7 +548,7 @@ def list_removable_mounts():
                 seen.add(m)
         return uniq
 
-    # -------------------------
+        # -------------------------
     # LINUX / macOS
     # -------------------------
     system = platform.system()
@@ -559,30 +559,35 @@ def list_removable_mounts():
         except Exception:
             fstype = ""
 
-        mp = p.mountpoint
+        mp = p.mountpoint  # p.ej. "/Volumes/L357" o "/System/Volumes/Data"
+        mpl = mp.lower()
 
-        # Filtrado específico por sistema
         if system == "Darwin":  # macOS
-            # En macOS los USB externos típicamente están en /Volumes/Nombre
-            if "/volumes/" not in mp.lower():
+            # Solo queremos volúmenes externos bajo /Volumes/
+            if not mpl.startswith("/volumes/"):
                 continue
+
+            # Evita volúmenes especiales del sistema si llegaran a aparecer
+            if "preboot" in mpl or "recovery" in mpl:
+                continue
+
         else:
             # Linux: típicamente /media, /mnt, vfat/exfat
             if (
-                "media" not in mp.lower()
-                and "mnt" not in mp.lower()
+                "media" not in mpl
+                and "mnt" not in mpl
                 and fstype not in ("vfat", "exfat", "msdos", "ntfs")
             ):
                 continue
 
-        # Si tienes EVISTR_SUBDIR, prefierelo
+        # Si tienes subcarpeta EVISTR_SUBDIR (p.ej. "RECORD"), úsala
         full_path = os.path.join(mp, EVISTR_SUBDIR)
         if os.path.exists(full_path):
             mounts.append(full_path)
         else:
             mounts.append(mp)
 
-    # Agregar EXTRA_SCAN_DIRS (por si quieres forzar rutas)
+    # Agregar EXTRA_SCAN_DIRS (por si quieres forzar rutas fijas)
     mounts.extend([p for p in EXTRA_SCAN_DIRS if os.path.exists(p)])
 
     # Deduplicar
@@ -593,6 +598,8 @@ def list_removable_mounts():
             seen.add(m)
 
     return uniq
+
+
 
 def wait_for_file_ready(path: Path, min_stable_secs: float = 1.5, timeout: float = 20.0) -> bool:
     end = time.time() + timeout
@@ -841,14 +848,28 @@ for _ in range(2):  # o el número que uses
     Thread(target=worker, daemon=True).start()
 
 def run_once():
+    # 1) Detectar montajes
     mounts = list_removable_mounts()
+    print(f"Montajes detectados: {mounts}")
+
     if not mounts:
         print("No se detectan grabadoras montadas ni EXTRA_SCAN_DIRS.")
+        print("Nuevos copiados: 0")
+        print("Nada pendiente.")
+        return
+
+    # 2) Escanear cada montaje y copiar audios nuevos al INBOX
     total_new = []
     for m in mounts:
-        total_new.extend(discover_new_audios(m))
+        print(f"Escaneando: {m}")
+        try:
+            total_new.extend(discover_new_audios(m))
+        except Exception as e:
+            print(f"[WARN] Error al escanear {m}: {e}", file=sys.stderr)
+
     print(f"Nuevos copiados: {len(total_new)}")
 
+    # 3) Buscar manifiestos en estado "copied" pendientes por procesar
     pendings = []
     for p in MANIFESTS.glob("*.json"):
         try:
@@ -862,11 +883,12 @@ def run_once():
         print("Nada pendiente.")
         return
 
-    # Encola en la cola GLOBAL y espera a que terminen los workers
+    # 4) Encolar en la cola GLOBAL y esperar a que terminen los workers
     for man in pendings:
         q.put(man)
 
     q.join()
+
 
 if __name__ == "__main__":
     if WATCHDOG_MAX_IDLE_SECS > 0:
