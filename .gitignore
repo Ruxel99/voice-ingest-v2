@@ -1,0 +1,24 @@
+bmd.zip
+*.zip
+# Entorno virtual
+.venv/
+
+# Carpeta temporal de PyInstaller
+build/
+
+# Ejecutables generados
+dist/
+
+# Logs
+logs/
+storage/
+
+# PyInstaller espec files (opcional)
+*.spec
+
+# Archivos de sistema
+__pycache__/
+*.pyc
+
+# No subir secretos
+.env

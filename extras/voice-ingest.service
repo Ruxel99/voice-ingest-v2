@@ -1,0 +1,10 @@
+[Unit]
+Description=Voice Ingest USB Service
+
+[Service]
+WorkingDirectory=%h/voice-ingest-v2
+ExecStart=%h/voice-ingest-v2/.venv/bin/python ingest.py --loop
+Restart=always
+
+[Install]
+WantedBy=default.target
