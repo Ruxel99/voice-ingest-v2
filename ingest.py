@@ -94,14 +94,26 @@ def _install_mac_autorun():
 q = Queue(maxsize=16)
 def load_env():
     """
-    Carga .env desde el bundle (PyInstaller _MEIPASS) o, si no existe,
-    desde el directorio del ejecutable. Finalmente carga el entorno del SO.
+    Carga .env en este orden:
+    1. .env al lado del ejecutable (Cosito_mac)  -> prioridad alta
+    2. .env dentro del bundle (_MEIPASS)         -> por si alguna vez lo empacas
+    3. Variables de entorno del sistema
     """
-    base = Path(getattr(sys, "_MEIPASS", Path(sys.argv[0]).parent))
-    env_path = base / ".env"
-    if env_path.exists():
-        load_dotenv(env_path, override=False)
-    # También permite variables del sistema / usuario sin machacar las ya cargadas
+    # 1) Carpeta donde está el ejecutable real
+    exe_dir = Path(sys.argv[0]).resolve().parent
+    env_exe = exe_dir / ".env"
+    if env_exe.exists():
+        load_dotenv(env_exe, override=True)
+
+    # 2) Carpeta temporal de PyInstaller (por si llevas un .env embebido)
+    if hasattr(sys, "_MEIPASS"):
+        env_meipass = Path(sys._MEIPASS) / ".env"
+        if env_meipass.exists():
+            # Solo completa, no pisa lo que ya cargamos del exe_dir
+            load_dotenv(env_meipass, override=False)
+
+    # 3) Cargar también .env según la lógica normal de python-dotenv
+    #    (p.ej. si alguien lo pone en el cwd)
     load_dotenv(override=False)
 
 load_env()
