@@ -136,10 +136,22 @@ transcript that refer to products, you MUST return at least N items/batches in t
 We only have three intents:
 
 - "PRODUCTION"  → cuando se está HACIENDO / PRODUCIENDO ("hice", "se hicieron", "en la batidora X", etc.).
-- "INVENTORY"   → cuando se habla de stock actual ("quedan", "hay", "en inventario").
+- "INVENTORY"   → cuando se habla de stock actual o movimientos de inventario:
+    - stock actual: ("quedan", "queda", "hay", "hay en inventario", "stock", "en inventario").
+    - movimientos de inventario / recibidos de fábrica: ("recibimos", "recibí", "recibio", "recibió",
+      "se enviaron", "enviamos", "mandamos", "llegaron", "llegó", "salieron", "desde fábrica", "de fábrica").
+  En TODOS esos casos, el intent sigue siendo "INVENTORY".
 - "SALES"       → cuando se habla de ventas ("vendí", "vendimos", "se vendieron", "ventas").
 
-### GENERAL SALES PATTERN (VERY IMPORTANT)
+### GENERAL SALES PATTERN (ONLY IF INTENT = 'SALES')
+
+Sales is LESS frequent.  
+You MUST choose intent = "SALES" ONLY when the transcript clearly talks about selling
+(using words like "vendí", "vendimos", "venta", "ventas", "se vendieron").
+
+If there is NO clear selling language, you MUST NOT choose "SALES".
+In those cases, if there are patterns like "<number> de <flavor>" without selling verbs,
+you MUST default to "INVENTORY" (stock / inventory), NOT "SALES".
 
 For SALES, every time you see a pattern like:
 
@@ -159,6 +171,22 @@ Each numeric pattern (1, 2, 3, 5, 4, 2, 4, 1, 2, 2, ...) MUST produce its own JS
 Do NOT fuse "5 de minis, 4 en for you" into a single item. They are **two distinct items**:
 one for MINIS and one for NUTS FOR YOU (or the closest matching catalog flavor).
 
+### ASR / Speech Recognition Noise (IMPORTANT FOR INVENTORY)
+
+Sometimes the transcript will contain small errors from speech recognition.
+You MUST interpret them as the most likely Spanish word according to context:
+
+- "kean", "ke an", "quean", "que an", "ke en" at the beginning of the phrase,
+  followed by a number and a flavor, MUST be interpreted as "quedan":
+  - Example: "Kean 45 de Chocó Brownie" → interpret as "quedan 45 de Choco Brownie" (INVENTORY).
+
+- Phrases like "que es 2 de avellana", "que es dos de avellana", when they contain:
+  "que es" + number + "de" + flavor_name
+  MUST be treated as "quedan 2 de avellana" → INVENTORY.
+
+When you detect these ASR variants, you MUST choose intent = "INVENTORY",
+NOT "SALES".
+
 ### Pattern Rules
 
 #### PRODUCTION (making)
@@ -172,6 +200,9 @@ Examples:
 - "quedan {{quantity}} de {{flavor}}"
 - "hay {{quantity}} galletas de {{flavor}}"
 - "inventario: {{flavor}} {{quantity}}"
+- "se enviaron {{quantity}} de {{flavor}} a {{lugar}}"
+- "recibimos {{quantity}} de {{flavor}}"
+- "llegaron {{quantity}} de {{flavor}}"
 
 Each flavor becomes one item in "items".
 
@@ -258,9 +289,18 @@ IMPORTANT:
 ### Intent Decision (MUST)
 
 - If the transcript is about making products (hice, se hicieron, batidora, mezcladora) → "PRODUCTION".
-- If the transcript is about stock remaining (quedan, hay en inventario) → "INVENTORY".
-- If the transcript is about selling products (vendí, vendimos, se vendieron, ventas) → "SALES".
-- If both production and sales appear mixed, choose the INTENT that best matches the majority of numeric patterns.
+
+- If the transcript is about stock remaining or inventory movements 
+  (quedan, queda, hay, hay en inventario, stock, inventario, recibimos, se enviaron, llegaron, mandamos desde fábrica),
+  OR if the transcript contains ONLY patterns like "<number> de <flavor>" but NO clear selling verbs,
+  you MUST choose intent = "INVENTORY".
+
+- You MUST choose "SALES" ONLY when the transcript clearly talks about selling
+  using words like: "vendí", "vendimos", "se vendieron", "venta", "ventas".
+  Without these selling words, YOU MUST NOT choose "SALES".
+
+- If both production and sales appear mixed, choose the INTENT that best matches
+  the majority of numeric patterns AND the verbs used.
 
 ### Output Format (STRICT)
 

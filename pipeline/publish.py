@@ -127,21 +127,60 @@ def _device_id_str():
     return str(c["device_id"])
 
 
+def _infer_movement_type(transcript: str) -> str:
+    """
+    Decide movement_type para la API de inventory movements,
+    usando solo el lenguaje natural del transcript.
+
+    - Si suena a recepción/envío desde fábrica → RECEIVED_FROM_FACTORY
+    - Si suena a stock disponible / quedan → CURRENT_STOCK
+    """
+    t = (transcript or "").lower()
+
+    # Palabras que indican recepción/envío desde fábrica
+    received_words = [
+        "recibimos", "recibí", "recibi", "recibio", "recibió",
+        "llegaron", "llego", "llegó",
+        "se enviaron", "enviamos", "envié", "envie",
+        "mandamos", "mandé", "mande",
+        "salieron", "salio", "salió",
+        "desde fábrica", "de fabrica", "de fábrica",
+        "recibido de fábrica", "recibido de fabrica"
+    ]
+    if any(w in t for w in received_words):
+        return "RECEIVED_FROM_FACTORY"
+
+    # Palabras que indican stock actual
+    stock_words = [
+        "quedan", "queda",
+        "hay", "hay en stock", "stock",
+        "en inventario", "inventario",
+        "disponibles", "disponible"
+    ]
+    if any(w in t for w in stock_words):
+        return "CURRENT_STOCK"
+
+    # Por defecto, si no está claro, lo tratamos como stock actual
+    return "CURRENT_STOCK"
+
+
 def publish_inventory(transcript: str, items: list, captured_at: str = None):
     """
-    Publica cada item como POST independiente.
-    - product_name se toma de flavor|flavor_name|product_name
-    - quantity_delta desde qty|quantity (>0)
-    - captured_at sale del filename si viene; si no, usa now
-    """
-    ensure_device_and_token()  # asegura que exista token o se registre
-    resp = _post_json(SALES_ENDPOINT, payload, require_auth=True, timeout=45)
+    Publica movimientos de inventario contra la API de inventory movements.
 
+    - Usa SIEMPRE el mismo endpoint INVENTORY_ENDPOINT.
+    - Decide movement_type en función del transcript:
+        * 'se enviaron / mandamos / llegaron / recibimos' → RECEIVED_FROM_FACTORY
+        * 'quedan / hay / stock / inventario'            → CURRENT_STOCK
+    - Hace UN POST por item (como antes).
+    """
+    ensure_device_and_token()
     device_id = _device_id_str()
+
+    movement_type = _infer_movement_type(transcript or "")
     results = []
 
-    for it in items:
-        # nombre de archivo si lo traes por item (ideal)
+    for it in items or []:
         audio_name = (
             it.get("filename")
             or it.get("audio_filename")
@@ -149,6 +188,7 @@ def publish_inventory(transcript: str, items: list, captured_at: str = None):
             or it.get("audio_name")
             or it.get("audio")
         )
+
         cap_iso, _, _ = _from_filename_or_now(audio_name, captured_at)
 
         product_name = (
@@ -157,8 +197,9 @@ def publish_inventory(transcript: str, items: list, captured_at: str = None):
             or it.get("flavor")
             or it.get("name")
             or ""
-        )
-        sku = it.get("sku") or None
+        ).strip()
+
+        sku = (it.get("sku") or "").strip()
 
         qty_raw = it.get("qty", it.get("quantity"))
         try:
@@ -166,34 +207,50 @@ def publish_inventory(transcript: str, items: list, captured_at: str = None):
         except Exception:
             qty_val = 0
 
-        if not product_name or not sku or qty_val == 0:
+        if not product_name or not sku or qty_val <= 0:
             results.append({
-                "payload": {"sku": sku, "product_name": product_name, "quantity_delta": qty_val},
-                "response": {"error": "Campos obligatorios inválidos (product_name/sku/quantity_delta)"}
+                "payload": {
+                    "sku": sku,
+                    "product_name": product_name,
+                    "quantity": qty_val
+                },
+                "response": {
+                    "error": "Campos obligatorios inválidos (product_name/sku/quantity)"
+                }
             })
             continue
 
-        move = {
-            "sku": sku,
-            "product_name": product_name,
-            "location": str(LOCATION_CODE),
-            "quantity_delta": qty_val,          # int > 0 (o negativo si tu parser así lo define)
-            "unit": "UNITS",
-            "reason": "VOICE_COUNT"
-        }
+        # ↕ cómo mapeamos la cantidad:
+        # para RECEIVED_FROM_FACTORY: delta positivo = lo que entró
+        # para CURRENT_STOCK: el backend probablemente interpretará este valor
+        quantity_delta = qty_val
 
+        # Armamos el cuerpo tal como lo espera el backend
         payload = {
             "device_id": device_id,
             "location_code": str(LOCATION_CODE),
             "captured_at": cap_iso,
-            "audio_ref": {"transcript": transcript or it.get("transcript", "") or "", "audio_url": None},
-            "inventory_movement": move
+            "inventory_movement": {
+                "sku": sku,
+                "product_name": product_name,
+                "location": str(LOCATION_CODE),     # reutilizamos la misma location
+                "quantity_delta": quantity_delta,
+                "reason": movement_type,            # p.ej. "RECEIVED_FROM_FACTORY" o "CURRENT_STOCK"
+            },
+            "notes": transcript or ""
         }
 
-        resp = _post_json(INVENTORY_ENDPOINT, payload, require_auth=True, timeout=45)
+        resp = _post_json(
+            INVENTORY_ENDPOINT,
+            payload,
+            require_auth=True,
+            timeout=45
+        )
+
         results.append({"payload": payload, "response": resp})
 
     return results
+
 import datetime as dt
 
 def _iso_now():
